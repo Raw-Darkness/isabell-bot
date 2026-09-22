@@ -1,0 +1,15 @@
+[Unit]
+Description=Isabell chat and image bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=boss
+WorkingDirectory=/home/boss/Isabell
+ExecStart=/usr/bin/python3 -m isabell
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=78
+
+[Install]
+WantedBy=multi-user.target

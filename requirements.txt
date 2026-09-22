@@ -1,0 +1,4 @@
+discord.py==2.3.2
+openai>=1.30
+aiohttp>=3.9
+Pillow>=9

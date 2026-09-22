@@ -1,0 +1,19 @@
+# real config & secrets — never commit
+Config.json
+Isabell.json
+.env
+
+# runtime state & user data
+app.log*
+channel_history.json
+dm_history/
+image_memory.json
+refusals.jsonl
+
+# server-specific content
+world_lore*
+IsabellPersonality.txt
+
+__pycache__/
+*.pyc
+.claude/
