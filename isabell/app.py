@@ -6,6 +6,7 @@ import os
 import re
 import signal
 import sys
+import time
 from typing import Any
 
 import discord
@@ -48,6 +49,8 @@ async def on_message(message: discord.Message):
         if await _owner_command(message):
             return
         if not core.is_allowed(message):
+            if isinstance(message.channel, discord.DMChannel):
+                await _dm_redirect(message)
             return
         if user_on_cooldown(message.author.id):
             return
@@ -69,6 +72,26 @@ async def on_message(message: discord.Message):
             asyncio.create_task(handle_text_message(message, text_override=text))
     except Exception:
         logging.exception("on_message router failure")
+
+
+# ---- DMs ---------------------------------------------------------------------
+_dm_redirected: dict[int, float] = {}
+
+
+async def _dm_redirect(message: discord.Message) -> None:
+    """DMs cannot be age-restricted, so she does not play there. Say so once a
+    day per person instead of going silent, and point to her channel."""
+    now = time.time()
+    if now - _dm_redirected.get(message.author.id, 0) < 86400:
+        return
+    _dm_redirected[message.author.id] = now
+    channel = next(iter(sorted(core.cfg_ids("AllowedChannels"))), 0)
+    template = config.get("DMRedirectMessage") or (
+        "Not here, darling. Private messages can't be age-restricted, so I only play in {channel}. Come find me there.")
+    try:
+        await safe_send(message.channel, template.format(channel=f"<#{channel}>" if channel else "my channel"))
+    except Exception:
+        logging.exception("DM redirect failed")
 
 
 # ---- Owner commands (DM only) -----------------------------------------------

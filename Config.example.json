@@ -68,6 +68,7 @@
     "EnableMessageContentIntent": true,
     "RequireAgeRestrictedChannel": true,
     "AllowInDMs": false,
+    "DMRedirectMessage": "Not here, darling. Private messages can't be age-restricted, so I only play in {channel}. Come find me there.",
     "ChannelNotAllowedNotice": "I only paint and play in the age-restricted channels set aside for it, darling.",
     "SafetyClassifierImages": true,
     "SafetyClassifierChat": true,

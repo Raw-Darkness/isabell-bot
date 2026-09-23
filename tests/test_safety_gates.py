@@ -164,3 +164,21 @@ def test_mod_alert_prefers_webhook(monkeypatch):
     asyncio.run(core.flag_to_mods("contextual", "details", ping=False))
     assert posted[0][1]["content"].startswith("@here") and posted[0][1]["allowed_mentions"]["parse"] == ["everyone"]
     assert not posted[1][1]["content"].startswith("@here") and posted[1][1]["allowed_mentions"]["parse"] == []
+
+
+def test_dm_gets_one_redirect_per_day(monkeypatch):
+    core.config["AllowInDMs"] = False
+    core.config["AllowedChannels"] = [10]
+    app._dm_redirected.clear()
+
+    class DM(core.discord.DMChannel):
+        def __init__(self):
+            self.sent = []
+        async def send(self, content=None, **k):
+            self.sent.append(content)
+
+    dm = DM()
+    m = types.SimpleNamespace(content="hi", channel=dm, author=types.SimpleNamespace(id=321, bot=False))
+    asyncio.run(app._dm_redirect(m))
+    asyncio.run(app._dm_redirect(m))
+    assert len(dm.sent) == 1 and "<#10>" in dm.sent[0] and "age-restricted" in dm.sent[0]
