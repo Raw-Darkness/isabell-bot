@@ -29,6 +29,7 @@ async def on_ready():
     logging.info("READY as %s (id=%s) pid=%s", bot.user, getattr(bot.user, "id", "?"), os.getpid())
     if not _started:
         _started = True
+        _signals()
         bot.add_view(ImageActionsView())  # persistent buttons survive restarts
         for coro in (_periodic_save(), _config_watch(), _sync_commands()):
             bot.loop.create_task(coro)
@@ -214,7 +215,9 @@ async def _config_watch():
 
 
 def _signals():
-    loop = asyncio.get_event_loop()
+    # Called from on_ready, inside the running loop. Python 3.14 no longer
+    # creates a loop on demand, so asking for one before bot.run() fails.
+    loop = asyncio.get_running_loop()
 
     def _shutdown(sig):
         logging.info("Received %s — flushing state", sig.name)
@@ -231,7 +234,6 @@ def _signals():
 
 def main() -> None:
     lore.load_lore()
-    _signals()
     token = config.get("DiscordToken") or ""
     if not token:
         logging.error("No DiscordToken in %s.", core.CONFIG_PATH)
