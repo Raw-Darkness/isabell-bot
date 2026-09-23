@@ -9,6 +9,7 @@
     "OpenaiModel": "mistralai/mistral-small-3.2-24b-instruct",
     "SDURL": "http://127.0.0.1:7860/sdapi/v1/txt2img",
     "SDPositivePrompt": "score_9, score_8_up, score_7_up, uncensored, <lora:Expressive_H:1>",
+    "SDExplicitExtras": "uncensored, <lora:Expressive_H:1>",
     "SDNegativePrompt": "(child:2), (loli:2), score_4, score_5, anatomical nonsense, bad anatomy, bad proportions, bad aspect ratio",
     "SDSteps": 20,
     "SDHeight": 1024,
@@ -81,5 +82,6 @@
     "RefusalLogPath": "refusals.jsonl",
     "ModAlertPing": true,
     "RetentionDays": 30,
-    "StorageKeyPath": "isabell.key"
+    "StorageKeyPath": "isabell.key",
+    "ImagePromptMaxChars": 600
 }

@@ -179,6 +179,11 @@ async def sd_generate(
 
     Returns (images, seed_used, first_image_b64)."""
     prefix = positive_prefix if positive_prefix is not None else config["SDPositivePrompt"]
+    # Explicit-leaning extras (e.g. "uncensored" and an NSFW LoRA) are left out when the
+    # prompt is rated safe; otherwise they push nudity into images nobody asked to be nude.
+    extras = str(config.get("SDExplicitExtras") or "")
+    if extras and positive_prefix is None and "rating_safe" not in (prompt or ""):
+        prefix = prefix.rstrip().rstrip(",") + ", " + extras.strip().rstrip(",") + ", "
     batch = max(1, min(int(config.get("SDMaxBatch", 4)), batch))
     payload = {
         "prompt": prefix + prompt,
@@ -475,69 +480,150 @@ async def run_image_job(
         await safe_send(channel, "Oops — image generation hit a snag.")
 
 
-async def compile_sd_prompt(user_text: str) -> str:
-    max_chars = int(config.get("ImagePromptMaxChars", 1600))
+# ---- Prompt writing for Pony Realism ------------------------------------------
+# One guide for every path that writes a Stable Diffusion prompt: the rewrite of a
+# member's request, follow-up refinements, and the chat model's generate_image tool.
+# Pony-based models respond to booru-style tags in a rough subject-first order and
+# are steered by rating tags; the text encoder reads 75-token chunks and weighs
+# early tags most, so short and ordered beats long and "amplified".
+def pony_guide(max_chars: int) -> str:
     name = (config.get("Name") or "the assistant").strip()
-
-    system = (
-        "You are an expert prompt engineer for Pony Realism SDXL models.\n\n"
-        "Rewrite the USER PROMPT into ONE comma-separated line of tags optimized for Pony Realistic SDXL.\n\n"
+    return (
+        "Write image prompts for a photorealistic SDXL model trained on booru-style tags. "
+        "It understands tags, not sentences.\n"
+        "FORMAT: one line of comma-separated tags, nothing else. Write tags with spaces, not underscores "
+        "(the only exceptions are rating_safe, rating_questionable, rating_explicit).\n"
+        "ORDER:\n"
+        "1. rating tag: rating_explicit only for sexual content, rating_questionable for suggestive or "
+        "nude-but-not-sexual, otherwise rating_safe\n"
+        "2. who: the count and gender the request states (1girl, 1boy, 2girls, 1girl 1boy); if it states no "
+        "gender, write solo or the count only; for scenery with nobody in it write no humans, never solo\n"
+        "3. the subject: species or race, then appearance the request describes\n"
+        "4. clothing as requested or as the scene implies\n"
+        "5. pose and action\n"
+        "6. setting and background\n"
+        "7. lighting, and framing that fits: full body or wide shot for a scene, cowboy shot or upper body for a character\n"
         "RULES:\n"
-        "- Output exactly one line of pure tags. No quotes, no explanations.\n"
-        f"- Stay under {max_chars} characters.\n"
-        "- Amplify and clarify every visual and aesthetic element from the user's description.\n"
-        "- Use ( ) with weights for emphasis, e.g. (detailed eyes:1.3)\n"
-        "- Add relevant body/lighting/camera tags when implied by the scene.\n"
-        "- NEVER add characters, locations, or elements not implied by the user prompt.\n"
-        f"- NEVER mention {name} or any persona metadata unless the USER PROMPT explicitly references it.\n"
+        f"- Under {max_chars} characters and at most 30 tags. The most important tags go first. Stop when the scene is described.\n"
+        "- Include only what the request states or clearly implies. Never add characters, places, nudity, "
+        "sexual content or body-size details the request does not ask for.\n"
+        "- Do not add quality tags (score_9, masterpiece, best quality, 8k, highly detailed): they are added automatically.\n"
+        "- Weights only for what the request stresses: at most three, between 1.1 and 1.4, written (tag:1.2).\n"
+        "- Everyone depicted is an adult. Never write tags that make anyone look young: child, young, teen, "
+        "loli, shota, school uniform, flat chest, childlike or small proportions.\n"
+        "- No negative-prompt terms, no repeated tags, no explanations.\n"
+        f"- Do not mention {name} or any persona unless the request does."
     )
 
-    user = f"USER PROMPT:\n{user_text}"
-    msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
+_KEEP_UNDERSCORE = ("rating_", "score_", "source_")
+# Added automatically by the prefix, or meaningless to Pony: stripped if the model writes them.
+_QUALITY_TAGS = {
+    "masterpiece", "best quality", "high quality", "highest quality", "top quality", "ultra detailed",
+    "ultra-detailed", "highly detailed", "extremely detailed", "detailed", "intricate", "intricate details",
+    "4k", "8k", "uhd", "hdr", "hd", "high resolution", "absurdres", "photorealistic", "realistic",
+    "score 9", "score 8 up", "score 7 up",
+}
+MAX_TAGS = 30
+_RATINGS = ("rating_safe", "rating_questionable", "rating_explicit")
+_EXPLICIT_RE = re.compile(
+    r"\b(explicit|sex|fuck\w*|cock|dick|penis|pussy|vagina|cum\w*|penetrat\w*|anal|oral|blowjob|"
+    r"breed\w*|mating|orgasm\w*|rape|tentacle sex|nsfw|hardcore)\b", re.I)
+_NUDE_RE = re.compile(r"\b(nude|naked|topless|bottomless|nipples?|breasts? out|undress\w*|lingerie|bikini)\b", re.I)
+
+
+def ensure_rating(prompt: str, request: str) -> str:
+    """Pony is steered by its rating tag and the explicit extras depend on it, so every
+    prompt gets exactly one, first. The model's choice wins; when it forgot, infer it."""
+    tags = [t.strip() for t in prompt.split(",") if t.strip()]
+    given = [t for t in tags if t.lower() in _RATINGS]
+    rest = [t for t in tags if t.lower() not in _RATINGS]
+    if given:
+        rating = given[0].lower()
+    else:
+        text = f"{request} {prompt}"
+        rating = ("rating_explicit" if _EXPLICIT_RE.search(text)
+                  else "rating_questionable" if _NUDE_RE.search(text) else "rating_safe")
+    return ", ".join([rating] + rest)
+
+
+def tidy_tags(prompt: str, request: str = "") -> str:
+    """Deterministic clean-up of a model-written prompt: spaces instead of underscores
+    (except rating/score/source tags and LoRAs), no quality tags, no duplicates, no
+    ponies nobody asked for (the base model's name leaks in), at most MAX_TAGS tags."""
+    asked_pony = "pon" in (request or "").lower()
+    seen, out = set(), []
+    for tag in (prompt or "").split(","):
+        tag = tag.strip()
+        if not tag:
+            continue
+        if not tag.lower().startswith(_KEEP_UNDERSCORE) and "<lora:" not in tag:
+            tag = tag.replace("_", " ")
+        tag = re.sub(r"^[a-z ]{2,20}:\s*(?=[a-z])", "", tag, flags=re.I) if "<lora:" not in tag else tag
+        key = re.sub(r"[()]|:\s*\d(\.\d+)?", "", tag).strip().lower()
+        if key.startswith("score_") or key in _QUALITY_TAGS or key in seen:
+            continue
+        if not asked_pony and key in ("pony", "ponies", "my little pony"):
+            continue
+        seen.add(key)
+        out.append(tag)
+        if len(out) >= MAX_TAGS:
+            break
+    return ", ".join(out)
+
+
+def clip_tags(prompt: str, max_chars: int) -> str:
+    """Trim an over-long prompt at a tag boundary instead of mid-word."""
+    prompt = (prompt or "").strip().strip(",")
+    if len(prompt) <= max_chars:
+        return prompt
+    cut = prompt[:max_chars]
+    return cut[:cut.rfind(",")].strip() if "," in cut else cut
+
+
+def max_prompt_chars() -> int:
+    return int(config.get("ImagePromptMaxChars", 600))
+
+
+async def compile_sd_prompt(user_text: str) -> str:
+    max_chars = max_prompt_chars()
+    msgs = [{"role": "system", "content": pony_guide(max_chars)},
+            {"role": "user", "content": f"REQUEST:\n{user_text}"}]
     try:
-        tok_budget = max(256, min(2000, max_chars // 3))
-        raw = await chat_async(msgs, temperature=0.0, max_tokens=tok_budget, model=utility_model())
-        raw = (raw or "").strip().strip("`")
+        raw = await chat_async(msgs, temperature=0.0, max_tokens=max(160, max_chars // 3), model=utility_model())
+        raw = (raw or "").strip().strip("`").splitlines()[0] if (raw or "").strip() else ""
         raw = re.sub(r"\((\d(?:\.\d+)?)\)\s*([^,()\n]+)", lambda m: f"({m.group(2).strip()}:{m.group(1)})", raw)
-        return raw[:max_chars]
+        return clip_tags(ensure_rating(tidy_tags(raw, user_text), user_text), max_chars) or clip_tags(user_text, max_chars)
     except Exception:
         logging.exception("LLM prompt compose failed; returning user text")
-        return (user_text or "")[:max_chars]
+        return clip_tags(user_text, max_chars)
 
 
 async def refine_image_prompt(last: ImagePromptRecord, followup_text: str) -> dict[str, str]:
-    max_chars = int(config.get("ImagePromptMaxChars", 1600))
-    name = (config.get("Name") or "the assistant").strip()
-
+    max_chars = max_prompt_chars()
     system = (
-        "Refine a Stable Diffusion prompt based on a follow-up instruction.\n"
-        "- Preserve subject, style, and descriptors from the previous prompt.\n"
-        "- Merge ONLY new instructions from the follow-up.\n"
-        f"- Do NOT introduce {name} or any persona unless explicitly mentioned.\n"
-        f"- Keep under {max_chars} chars.\n"
-        '- Output JSON: {"prompt":"...","negative":"..."}.'
+        pony_guide(max_chars)
+        + "\n\nTASK: you are given the previous prompt and a follow-up instruction. Keep the previous "
+        "subject, style and details, apply ONLY the change the follow-up asks for, and keep the rating tag "
+        "consistent with the result. Output JSON only: {\"prompt\": \"...\", \"negative\": \"...\"} where "
+        "negative is the previous negative prompt, changed only if the follow-up asks to remove something."
     )
-    user = (
-        f"Previous: {last.final_sd_prompt}\n"
-        f"Negative: {last.negative_prompt}\n"
-        f"Follow-up: {followup_text}"
-    )
-    msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    user = f"Previous: {last.final_sd_prompt}\nNegative: {last.negative_prompt}\nFollow-up: {followup_text}"
     try:
-        raw = await chat_async(msgs, temperature=0.0, max_tokens=max(256, min(2000, max_chars // 3)), model=utility_model())
+        raw = await chat_async([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                               temperature=0.0, max_tokens=max(200, max_chars // 2), model=utility_model())
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", (raw or "").strip())
         data = json.loads(raw)
         if not isinstance(data, dict):
             raise ValueError("bad json")
-        data["prompt"] = (data.get("prompt", last.final_sd_prompt) or "")[:max_chars]
+        req = f"{last.user_prompt} {followup_text}"
+        data["prompt"] = clip_tags(ensure_rating(tidy_tags(data.get("prompt") or last.final_sd_prompt, req), req), max_chars)
+        data["negative"] = data.get("negative") or last.negative_prompt
         return data
     except Exception:
-        logging.warning("Refine parse failed; fallback append")
-        return {
-            "prompt": f"{last.final_sd_prompt}, {followup_text}"[:max_chars],
-            "negative": last.negative_prompt,
-        }
+        logging.warning("Refine parse failed; appending the follow-up")
+        return {"prompt": clip_tags(f"{last.final_sd_prompt}, {followup_text}", max_chars),
+                "negative": last.negative_prompt}
 
 
 IMAGE_TOOL = {
@@ -555,8 +641,12 @@ IMAGE_TOOL = {
                 "prompt": {
                     "type": "string",
                     "description": (
-                        "A detailed comma-separated Stable Diffusion prompt for the image the user "
-                        "wants, using the conversation for any context they left implicit."
+                        "Booru-style comma-separated tags for Pony Realism, under 600 characters, in this "
+                        "order: rating tag (rating_safe / rating_questionable / rating_explicit), who "
+                        "(1girl, 1boy, solo...), subject, clothing, pose, setting, lighting and framing. "
+                        "Use the conversation for context the user left implicit, but add nothing they did "
+                        "not ask for. Spaces not underscores. No quality tags, no sentences. Everyone "
+                        "depicted is an adult."
                     ),
                 },
                 "aspect": {"type": "string", "enum": ["square", "portrait", "landscape"]},
@@ -604,7 +694,7 @@ async def run_tool_image(message: discord.Message, args: dict) -> bool:
         message.channel,
         ch_id=channel_key(message),
         user_prompt=message.content or "",
-        sd_prompt=prompt[: int(config.get("ImagePromptMaxChars", 1600))],
+        sd_prompt=clip_tags(ensure_rating(tidy_tags(prompt, message.content or ""), message.content or ""), max_prompt_chars()),
         neg=config.get("SDNegativePrompt", "(lowres, blurry, deformed)"),
         width=width,
         height=height,

@@ -34,6 +34,8 @@ _BLOCK_TERMS_BUILTIN = frozenset({
     "teen", "teens", "teenage", "teenager", "adolescent",
     "young girl", "young boy", "young one", "little girl", "little boy",
     "small girl", "small boy", "flat chested child", "youngster",
+    # e621 (part of the base model's training data) tags underage anthro characters "cub".
+    "cub", "cubs",
 })
 # Terms distinctive enough to catch even when spaced or punctuated apart
 # ("l.o.l.i", "l o l i") by matching the de-punctuated text.
@@ -364,7 +366,8 @@ _CLASSIFIER_SYSTEM = (
     "You are a strict content safety classifier for an adults-only creative community. "
     "Decide whether the TEXT requests, depicts or describes sexual or suggestive content involving anyone "
     "under 18, or a character presented as a child, minor, or childlike (small/undeveloped body, "
-    "school setting, stated or implied age under 18, 'loli'/'shota' aesthetics), regardless of claims "
+    "school setting, stated or implied age under 18, 'loli'/'shota'/'cub' aesthetics, including young "
+    "animal, monster or anthro characters), regardless of claims "
     "that the character is an adult. Adult content between adults is ALLOWED and must be answered NO. "
     "Answer with exactly one word: YES or NO."
 )
@@ -403,6 +406,7 @@ _VISION_SYSTEM = (
     "You are a strict content safety reviewer for an adults-only community. Look at the image. "
     "Does it depict anyone who appears to be under 18, or a character drawn to look like a child or "
     "young teenager (childlike face or proportions, very small or undeveloped body, school-age appearance), "
+    "or a juvenile animal, monster or anthro character in a sexual or suggestive context, "
     "in any context? Adults in explicit content are ALLOWED and must be answered NO. "
     "Answer with exactly one word: YES or NO."
 )
