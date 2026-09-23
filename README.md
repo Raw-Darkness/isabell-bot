@@ -9,7 +9,7 @@ Roleplay chat and image generation bot for an adults-only game community. Isabel
 
 ## Safety, in layers
 
-Every image and every chat turn passes through all of these. A refusal is logged to `refusals.jsonl` and posted to the mod channel; terms with no innocent use page `@here`, judgement calls are posted for a human to verify. The bot itself never bans or kicks anyone.
+Every image and every chat turn passes through all of these. A refusal is logged to `refusals.jsonl` and posted to the mod channel, through `ModAlertWebhook` when set so the bot needs no access to that channel; terms with no innocent use page `@here`, judgement calls are posted for a human to verify. The bot itself never bans or kicks anyone.
 
 | Layer | What | Where |
 |---|---|---|

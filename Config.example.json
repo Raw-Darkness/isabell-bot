@@ -19,6 +19,7 @@
     "Name": "Isabell",
     "Personality": "The character's personality, voice and boundaries. Stays out of git.",
     "ModChannelID": 0,
+    "ModAlertWebhook": "",
     "FrequencyPenalty": 0.3,
     "PresencePenalty": 0.3,
     "EmptyReplyFallback": "Hmph. Some things even I will not dignify with an answer, darling.",

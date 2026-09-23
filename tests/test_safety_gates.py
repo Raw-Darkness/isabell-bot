@@ -141,3 +141,26 @@ def test_startup_path(monkeypatch):
     core.config["DiscordToken"] = "x"
     app.main()
     assert started == ["x"]
+
+
+def test_mod_alert_prefers_webhook(monkeypatch):
+    posted = []
+
+    class Resp:
+        status = 204
+        async def __aenter__(s): return s
+        async def __aexit__(s, *a): pass
+
+    class Sess:
+        def __init__(s, **k): pass
+        async def __aenter__(s): return s
+        async def __aexit__(s, *a): pass
+        def post(s, url, json):
+            posted.append((url, json)); return Resp()
+
+    monkeypatch.setattr(core.aiohttp, "ClientSession", Sess)
+    monkeypatch.setitem(core.config, "ModAlertWebhook", "https://hook")
+    asyncio.run(core.flag_to_mods("Blocked chat — HARD term", "details", ping=True))
+    asyncio.run(core.flag_to_mods("contextual", "details", ping=False))
+    assert posted[0][1]["content"].startswith("@here") and posted[0][1]["allowed_mentions"]["parse"] == ["everyone"]
+    assert not posted[1][1]["content"].startswith("@here") and posted[1][1]["allowed_mentions"]["parse"] == []

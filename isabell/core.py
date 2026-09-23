@@ -9,6 +9,7 @@ from collections import deque
 from logging.handlers import TimedRotatingFileHandler
 from typing import Any
 
+import aiohttp
 import discord
 from discord import app_commands
 
@@ -211,9 +212,24 @@ async def flag_to_mods(title: str, details: str, ping: bool = True) -> None:
     """Post to the mod channel. ping=False posts silently for contextual matches
     that may be false positives."""
     flag_history.append((time.time(), title, details))
+    prefix = "@here " if ping and config.get("ModAlertPing", True) else ""
+    text = clamp_2000(f"{prefix}⚠️ **{title}**\n{details}")
+    # Preferred: a webhook in the mod channel, so the bot needs no access to it.
+    hook = str(config.get("ModAlertWebhook") or "")
+    if hook:
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                async with s.post(hook, json={
+                    "content": text, "username": f"{config.get('Name', 'Bot')} safety",
+                    "allowed_mentions": {"parse": ["everyone"] if prefix else []},
+                }) as r:
+                    if r.status < 300:
+                        return
+                    logging.error("Mod alert webhook returned HTTP %s", r.status)
+        except Exception:
+            logging.exception("Mod alert webhook failed; trying the channel")
     ch = await get_channel(cfg_int("ModChannelID"))
     if ch is None:
+        logging.error("Mod alert could not be delivered: %s", title)
         return
-    prefix = "@here " if ping and config.get("ModAlertPing", True) else ""
-    await safe_send(ch, f"{prefix}⚠️ **{title}**\n{details}",
-                    allowed_mentions=discord.AllowedMentions(everyone=True, users=False, roles=False))
+    await safe_send(ch, text, allowed_mentions=discord.AllowedMentions(everyone=True, users=False, roles=False))
