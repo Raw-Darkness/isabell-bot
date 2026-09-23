@@ -19,7 +19,9 @@ Every image and every chat turn passes through all of these. A refusal is logged
 | 4 | **Channel gating.** The bot only operates in `AllowedChannels` that Discord flags as age-restricted, and not in DMs unless `AllowInDMs` is set. | `core.channel_allowed` |
 | 5 | **Cooldown.** Three hard refusals in 24 hours and the bot stops responding to that account for 24 hours. Contextual matches never count. | `safety.user_on_cooldown` |
 
-A blocked exchange never enters conversation memory, so it cannot steer later replies. The word filter is the same code as the monitor in Barnabus; keep the two in sync when tuning.
+A blocked exchange never enters conversation memory, so it cannot steer later replies.
+
+**Stored data** — conversation memory, image prompts and the refusal log — is encrypted at rest with `isabell.key` (created on first run; back it up with the data) and deleted after `RetentionDays` (default 30). `!forget <user_id>` by owner DM deletes everything held about one person. The word filter is the same code as the monitor in Barnabus; keep the two in sync when tuning.
 
 ## Setup
 
@@ -42,10 +44,18 @@ Message Content intent is required. Invite with scopes `bot` + `applications.com
 | `Isabell.json` | real config, token, key, persona | no |
 | `channel_history.json`, `dm_history/` | conversation memory | no |
 | `image_memory.json` | recent prompts per channel, for buttons and follow-ups | no |
-| `refusals.jsonl` | every refusal, for review | no |
+| `refusals.jsonl` | every refusal, for review, 30 days | no |
+| `isabell.key` | encryption key for all of the above | no |
 | `world_lore.txt`, `world_lore_short.txt` | full and compact lore | no |
 
-Owner commands by DM: `!reload`, `!clearhistory <channel_id>`, `!flags`.
+Owner commands by DM: `!reload`, `!clearhistory <channel_id>`, `!forget <user_id>`, `!flags`.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
 
 ## Privacy
 

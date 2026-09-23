@@ -256,12 +256,35 @@ _cooldown_until: dict[int, float] = {}
 
 
 def _log_refusal(kind: str, uid: int, name: str, matched: str, text: str) -> None:
+    from . import store
     try:
-        with open(config.get("RefusalLogPath", REFUSAL_LOG), "a", encoding="utf-8") as f:
-            f.write(json.dumps({"ts": time.time(), "kind": kind, "user_id": uid, "name": name,
-                                "matched": matched, "text": (text or "")[:300]}, ensure_ascii=False) + "\n")
+        store.append_line(config.get("RefusalLogPath", REFUSAL_LOG), {
+            "ts": time.time(), "kind": kind, "user_id": uid, "name": name,
+            "matched": matched, "text": (text or "")[:300]})
     except Exception:
         logging.exception("Could not write refusal log")
+
+
+def expire_refusals() -> int:
+    """Delete refusal log entries older than the retention period. The alert in the
+    mod channel is the moderators' long-term record."""
+    from . import store
+    path = config.get("RefusalLogPath", REFUSAL_LOG)
+    rows = store.read_lines(path)
+    keep = [r for r in rows if r.get("ts", 0) >= store.retention_cutoff()]
+    if len(keep) != len(rows):
+        store.rewrite_lines(path, keep)
+    return len(rows) - len(keep)
+
+
+def forget_refusals(user_id: int) -> int:
+    from . import store
+    path = config.get("RefusalLogPath", REFUSAL_LOG)
+    rows = store.read_lines(path)
+    keep = [r for r in rows if r.get("user_id") != user_id]
+    if len(keep) != len(rows):
+        store.rewrite_lines(path, keep)
+    return len(rows) - len(keep)
 
 
 def _strike(uid: int, hard: bool) -> bool:

@@ -1,6 +1,7 @@
 # real config & secrets — never commit
 Config.json
 Isabell.json
+isabell.key
 .env
 
 # runtime state & user data
@@ -17,3 +18,4 @@ IsabellPersonality.txt
 __pycache__/
 *.pyc
 .claude/
+venv/

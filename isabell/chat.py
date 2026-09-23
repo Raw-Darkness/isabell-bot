@@ -103,7 +103,7 @@ async def handle_text_message(message: discord.Message, text_override: str | Non
         is_dm = isinstance(message.channel, discord.DMChannel)
 
         incoming = text_override if text_override is not None else (message.content or "")
-        recent_ctx = " ".join(t for _, t in list(cm.get(ch_id).turns)[-6:])[-1500:]
+        recent_ctx = " ".join(t for _, t in cm.get(ch_id).pairs()[-6:])[-1500:]
         blocked = chat_message_blocked(incoming, recent_ctx) or await classify_chat(f"{recent_ctx[-600:]}\n{incoming}")
         if blocked:
             # Never reaches the model and never enters conversation memory, so it
@@ -118,7 +118,7 @@ async def handle_text_message(message: discord.Message, text_override: str | Non
         # Build the retrieval query from the recent exchange, not just this line —
         # otherwise "tell me more about him" retrieves nothing.
         this_text = text_override if text_override is not None else (message.content or "")
-        recent = [t for r, t in list(cm.get(ch_id).turns)[-4:] if r == "user"]
+        recent = [t for r, t in cm.get(ch_id).pairs()[-4:] if r == "user"]
         retrieval_query = " ".join(recent[-2:] + [this_text])[-1200:]
         system_prefix = build_system_prefix(retrieval_query)
         msgs = cm.build_messages(ch_id, system_prefix=system_prefix)
@@ -169,7 +169,7 @@ async def handle_text_message(message: discord.Message, text_override: str | Non
         # Loop breaker: a reply that near-duplicates a recent one gets one
         # retry with an explicit nudge. A still-duplicated reply is sent but
         # NOT stored, so the repetition cannot reinforce itself in memory.
-        recent = [t for r, t in list(cm.get(ch_id).turns)[-8:] if r == "assistant"]
+        recent = [t for r, t in cm.get(ch_id).pairs()[-8:] if r == "assistant"]
         if any(_too_similar(reply, prev) for prev in recent):
             logging.warning("Repetition detected in ch %s; retrying with nudge", ch_id)
             retry_msgs = msgs + [

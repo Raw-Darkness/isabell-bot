@@ -17,7 +17,7 @@ from .memory import cm
 from .images import ipm, ImageActionsView, run_image_job, compile_sd_prompt
 from .chat import (handle_text_message, handle_image_message, looks_like_image_request,
                    should_route_to_image_followup, _looks_like_tag_prompt)
-from .safety import image_prompt_blocked, refuse_image_request, user_on_cooldown
+from .safety import image_prompt_blocked, refuse_image_request, user_on_cooldown, expire_refusals, forget_refusals
 from .llm import llm_enabled
 
 _started = False
@@ -31,7 +31,7 @@ async def on_ready():
         _started = True
         _signals()
         bot.add_view(ImageActionsView())  # persistent buttons survive restarts
-        for coro in (_periodic_save(), _config_watch(), _sync_commands()):
+        for coro in (_periodic_save(), _config_watch(), _sync_commands(), _retention_loop()):
             bot.loop.create_task(coro)
         logging.info("Gating: age-restricted channels only=%s, DMs=%s, allowed channels=%s",
                      config.get("RequireAgeRestrictedChannel", True), config.get("AllowInDMs", False),
@@ -97,6 +97,16 @@ async def _owner_command(message: discord.Message) -> bool:
         ok = cm.clear_channel(target)
         await message.channel.send("✅ Cleared." if ok else "No stored history for that channel.")
         return True
+    if cmd == "!forget":
+        try:
+            uid = int(arg.strip().lstrip("<@!").rstrip(">"))
+        except ValueError:
+            await message.channel.send("Usage: `!forget <user_id>` — deletes everything held about that user.")
+            return True
+        w, i, r = cm.forget_user(uid), ipm.forget_user(uid), forget_refusals(uid)
+        logging.info("Data deletion for %s: %d windows, %d image records, %d refusal entries", uid, w, i, r)
+        await message.channel.send(f"🧹 Deleted {w} conversation window(s), {i} image record(s), {r} refusal entr(ies) for `{uid}`.")
+        return True
     if cmd == "!flags":
         recent = list(core.flag_history)[-20:]
         if not recent:
@@ -106,7 +116,7 @@ async def _owner_command(message: discord.Message) -> bool:
         await message.channel.send(body[:1900], allowed_mentions=discord.AllowedMentions.none())
         return True
     if cmd == "!help":
-        await message.channel.send("Owner commands: `!reload`, `!clearhistory <channel_id>`, `!flags`")
+        await message.channel.send("Owner commands: `!reload`, `!clearhistory <channel_id>`, `!forget <user_id>`, `!flags`")
         return True
     return False
 
@@ -185,6 +195,18 @@ async def _sync_commands():
         logging.info("Synced %d app command(s): %s", len(synced), [c.name for c in synced])
     except Exception:
         logging.exception("App command sync failed")
+
+
+async def _retention_loop():
+    """Hourly: delete stored content older than RetentionDays (default 30)."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            cm.expire(); ipm.expire(); expire_refusals()
+            cm.save_if_dirty(); ipm.save_if_dirty()
+        except Exception:
+            logging.exception("Retention sweep failed")
+        await asyncio.sleep(3600)
 
 
 async def _periodic_save():

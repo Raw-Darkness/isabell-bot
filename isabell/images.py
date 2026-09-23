@@ -16,6 +16,7 @@ import discord
 from PIL import Image
 
 from .core import config, bot, safe_send, channel_key, get_user_bucket, image_channel_allowed, images_enabled, image_unavailable
+from . import store
 from .llm import chat_async, utility_model
 from .safety import image_prompt_blocked, refuse_image_request, classify_image_prompt, check_rendered_image, user_on_cooldown
 
@@ -69,11 +70,7 @@ class ImagePromptMemory:
         if not self._dirty or not self.path:
             return
         try:
-            data = {str(ch): [rec.__dict__ for rec in arr] for ch, arr in self.by_channel.items() if arr}
-            tmp = self.path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False)
-            os.replace(tmp, self.path)
+            store.write_json(self.path, {str(ch): [rec.__dict__ for rec in arr] for ch, arr in self.by_channel.items() if arr})
             self._dirty = False
         except Exception:
             logging.exception("Failed to save image memory to %s", self.path)
@@ -82,17 +79,38 @@ class ImagePromptMemory:
         self._dirty = True
         self.save_if_dirty()
 
+    def expire(self) -> int:
+        cutoff, removed = store.retention_cutoff(), 0
+        for ch in list(self.by_channel):
+            keep = [r for r in self.by_channel[ch] if r.ts >= cutoff]
+            removed += len(self.by_channel[ch]) - len(keep)
+            if keep:
+                self.by_channel[ch] = keep
+            else:
+                del self.by_channel[ch]
+        if removed:
+            self._dirty = True
+        return removed
+
+    def forget_user(self, user_id: int) -> int:
+        removed = 0
+        for ch in list(self.by_channel):
+            keep = [r for r in self.by_channel[ch] if r.meta.get("by_id") != user_id]
+            removed += len(self.by_channel[ch]) - len(keep)
+            self.by_channel[ch] = keep
+        if removed:
+            self.force_save()
+        return removed
+
     def _load(self):
         if not self.path or not os.path.exists(self.path):
             return
         known = set(ImagePromptRecord.__dataclass_fields__)
         try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = store.read_json(self.path)
             for ch, arr in data.items():
-                self.by_channel[int(ch)] = [
-                    ImagePromptRecord(**{k: v for k, v in d.items() if k in known}) for d in arr
-                ]
+                self.by_channel[int(ch)] = [ImagePromptRecord(**{k: v for k, v in d.items() if k in known}) for d in arr]
+            self._dirty = True   # re-save encrypted
             logging.info("Loaded image memory for %d channels", len(self.by_channel))
         except Exception:
             logging.exception("Failed to load image memory from %s", self.path)
@@ -446,7 +464,7 @@ async def run_image_job(
             width=width or 0,
             height=height or 0,
             positive_prefix=positive_prefix or "",
-            meta={"by": requested_by},
+            meta={"by": requested_by, "by_id": requester_id},
             bot_message_id=getattr(sent, "id", None),
             ts=time.time(),
         ))
