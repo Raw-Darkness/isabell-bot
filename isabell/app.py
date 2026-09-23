@@ -18,7 +18,7 @@ from .memory import cm
 from .images import ipm, ImageActionsView, run_image_job, compile_sd_prompt
 from .chat import (handle_text_message, handle_image_message, looks_like_image_request,
                    should_route_to_image_followup, _looks_like_tag_prompt)
-from .safety import image_prompt_blocked, refuse_image_request, user_on_cooldown, expire_refusals, forget_refusals
+from .safety import strip_pasted_negative, image_prompt_blocked, refuse_image_request, user_on_cooldown, expire_refusals, forget_refusals
 from .llm import llm_enabled
 
 _started = False
@@ -166,6 +166,7 @@ async def draw_command(interaction: discord.Interaction, prompt: str, style: str
         if user_on_cooldown(interaction.user.id):
             await interaction.response.send_message("Not right now.", ephemeral=True)
             return
+        prompt = strip_pasted_negative(prompt)
         blocked = image_prompt_blocked(prompt)
         if blocked:
             await interaction.response.send_message(config.get(

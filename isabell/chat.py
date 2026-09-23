@@ -13,7 +13,7 @@ from .llm import chat_async
 from .memory import cm
 from .images import (ipm, _last_image_b64, run_image_job, compile_sd_prompt, refine_image_prompt,
                      image_tools_for, run_tool_image)
-from .safety import chat_message_blocked, refuse_chat, image_prompt_blocked, refuse_image_request, classify_chat
+from .safety import strip_pasted_negative, chat_message_blocked, refuse_chat, image_prompt_blocked, refuse_image_request, classify_chat
 
 
 _IMAGE_TRIGGER_RE = re.compile(
@@ -226,7 +226,7 @@ async def handle_image_message(message: discord.Message, text_override: str | No
             await safe_send(message.channel, "You're requesting images too fast — slow down a bit.")
             return
 
-        text_in = text_override if text_override is not None else (message.content or "")
+        text_in = strip_pasted_negative(text_override if text_override is not None else (message.content or ""))
         if not images_enabled():
             await image_unavailable(message.channel)
             return

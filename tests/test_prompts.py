@@ -43,3 +43,22 @@ def test_explicit_extras_only_when_not_rated_safe(monkeypatch):
 def test_e621_youth_tag_is_blocked():
     assert safety.image_prompt_blocked("a wolf cub, rating_explicit") == "cub"
     assert safety.image_prompt_blocked("anthro, cubs") is not None
+
+
+PASTED = ("**Prompt:**\n```giant orc, muscular, green skin, (tusks:1.2), (from behind:1.3)```\n"
+          "**Negative:** (child:2), (loli:2), score_4, score_5, bad anatomy\n**Seed:** `12345`")
+
+
+def test_pasted_negative_is_cut_before_checking():
+    cleaned = safety.strip_pasted_negative(PASTED)
+    assert cleaned == "giant orc, muscular, green skin, (tusks:1.2), (from behind:1.3)"
+    assert safety.image_prompt_blocked(cleaned) is None
+
+
+def test_a1111_metadata_format_and_plain_text():
+    assert safety.strip_pasted_negative("1girl, beach\nNegative prompt: child, blurry\nSteps: 20") == "1girl, beach"
+    assert safety.strip_pasted_negative("a woman in negative space art style") == "a woman in negative space art style"
+
+
+def test_blocked_term_in_the_positive_part_still_blocks():
+    assert safety.image_prompt_blocked(safety.strip_pasted_negative("**Prompt:** a loli\n**Negative:** blurry")) == "loli"

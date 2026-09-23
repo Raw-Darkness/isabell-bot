@@ -72,6 +72,23 @@ def _normalize_for_filter(text: str) -> tuple[str, str, str]:
     return folded, folded.replace(" ", ""), plain
 
 
+# Members paste prompts copied from the bot's own "Prompt" button or from image
+# metadata, which include the NEGATIVE prompt — and ours names exactly the terms the
+# filter blocks ("(child:2), (loli:2)"). The negative section is cut off before the
+# text is checked or used, and never used as a negative either: a member-supplied
+# negative such as "(adult:2)" would push images younger.
+_PASTED_NEGATIVE_RE = re.compile(r"(\*\*)?\s*\bnegative(\s+prompt)?\s*:", re.I)
+
+
+def strip_pasted_negative(text: str) -> str:
+    text = text or ""
+    m = _PASTED_NEGATIVE_RE.search(text)
+    if m:
+        text = text[:m.start()]
+    text = re.sub(r"^\s*(\*\*)?\s*prompt\s*:\s*(\*\*)?", "", text, flags=re.I)
+    return text.replace("```", " ").strip(" \n\t,")
+
+
 def image_prompt_blocked(text: str) -> str | None:
     """The matched term if this prompt must be refused, else None."""
     if not text:

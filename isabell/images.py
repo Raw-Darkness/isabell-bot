@@ -18,7 +18,7 @@ from PIL import Image
 from .core import config, bot, safe_send, channel_key, get_user_bucket, image_channel_allowed, images_enabled, image_unavailable
 from . import store
 from .llm import chat_async, utility_model
-from .safety import image_prompt_blocked, refuse_image_request, classify_image_prompt, check_rendered_image, user_on_cooldown
+from .safety import strip_pasted_negative, image_prompt_blocked, refuse_image_request, classify_image_prompt, check_rendered_image, user_on_cooldown
 
 
 @dataclass
@@ -309,9 +309,10 @@ async def _image_button(interaction: discord.Interaction, action: str):
             return
 
         if action == "prompt":
+            # The negative prompt is not shown: members copy this text back as a new
+            # request, and ours lists the very terms the filter refuses.
             text = (
                 f"**Prompt:**\n```{(rec.final_sd_prompt or '')[:1700]}```\n"
-                f"**Negative:** {(rec.negative_prompt or '')[:300]}\n"
                 f"**Seed:** `{rec.seed}`"
             )
             await interaction.response.send_message(text, ephemeral=True)
@@ -668,7 +669,7 @@ def image_tools_for(message: discord.Message):
 
 async def run_tool_image(message: discord.Message, args: dict) -> bool:
     """Act on a generate_image tool call. Returns True if a job was started."""
-    prompt = (args.get("prompt") or "").strip()
+    prompt = strip_pasted_negative(args.get("prompt") or "")
     if not prompt:
         return False
     if not images_enabled():
