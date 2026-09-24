@@ -397,7 +397,7 @@ async def run_image_job(
             return
         # Layer 2: a model reads the final prompt too. Word lists miss paraphrase;
         # this fails closed, so an unreviewed prompt is never rendered.
-        verdict = await classify_image_prompt(f"{user_prompt}\n---\n{sd_prompt}")
+        verdict = await classify_image_prompt(user_prompt, sd_prompt)
         if verdict:
             await refuse_image_request(channel, requester_id, requested_by or "unknown", verdict, sd_prompt)
             return

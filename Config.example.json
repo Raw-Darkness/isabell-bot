@@ -73,7 +73,7 @@
     "ChannelNotAllowedNotice": "I only paint and play in the age-restricted channels set aside for it, darling.",
     "SafetyClassifierImages": true,
     "SafetyClassifierChat": true,
-    "SafetyClassifierModel": "",
+    "SafetyClassifierModel": "deepseek/deepseek-v4.1-flash",
     "ImageOutputCheckEnabled": true,
     "ImageOutputCheckModel": "",
     "RefusalStrikeLimit": 3,

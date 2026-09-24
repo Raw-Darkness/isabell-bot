@@ -379,43 +379,62 @@ async def refuse_chat(channel, uid: int, name: str, matched: str, text: str, sou
 
 
 # ---- Layer 2: model second opinion ------------------------------------------
+# Tuned 2026-09-24 against 301 real clean messages and 60 known violations from the
+# old bot's logs. The earlier wording judged the whole channel as one text and gave no
+# examples of what is NOT a sign of a minor; it flagged 58 of the 301 (an adult woman
+# with a huge ogre, among them) while this wording on deepseek-v4.1-flash flags 8, all
+# "young ... girl" in sexual image requests, and still catches 60 of 60.
 _CLASSIFIER_SYSTEM = (
-    "You are a strict content safety classifier for an adults-only creative community. "
-    "Decide whether the TEXT requests, depicts or describes sexual or suggestive content involving anyone "
-    "under 18, or a character presented as a child, minor, or childlike (small/undeveloped body, "
-    "school setting, stated or implied age under 18, 'loli'/'shota'/'cub' aesthetics, including young "
-    "animal, monster or anthro characters), regardless of claims "
-    "that the character is an adult. Adult content between adults is ALLOWED and must be answered NO. "
+    "You are a strict safety classifier for an adults-only fantasy roleplay community. Sexual content between "
+    "adults is allowed, including with monsters, huge creatures and non-human species, rough or non-consensual "
+    "fantasy themes, and large size differences.\n"
+    "Decide one thing: does the MESSAGE request, describe or sexualize anyone under 18, or a character presented "
+    "as a child or as childlike? Signs: child, kid, teen or similar words for a person; a stated age under 18; "
+    "school-age settings; a body described as childlike or undeveloped; loli, shota or cub characters, including "
+    "young animal, monster or anthro characters. Claims that such a character is really an adult do not make it "
+    "acceptable.\n"
+    "These are NOT signs of a minor by themselves: an adult being small next to a large creature; pet names "
+    "between adults such as 'little one' or 'my sweet'; 'girl' or 'young woman' for an adult woman; petite "
+    "adults; pregnancy, offspring or breeding between adults; non-consent themes between adults.\n"
+    "CONTEXT is earlier conversation, only for resolving references like 'she' or 'the same'. Judge the MESSAGE.\n"
     "Answer with exactly one word: YES or NO."
 )
 
 
-async def _classify(text: str, fail_closed: bool) -> bool:
-    """True = the model judged the text to involve a minor."""
+async def _classify(message: str, context: str, fail_closed: bool) -> bool:
+    """True = the model judged the message to involve a minor."""
     from .llm import chat_async
+    user = f"CONTEXT:\n{(context or '')[-600:] or '(none)'}\n\nMESSAGE:\n{(message or '')[:3000]}"
     try:
         out = await chat_async(
-            [{"role": "system", "content": _CLASSIFIER_SYSTEM}, {"role": "user", "content": f"TEXT:\n{(text or '')[:3000]}"}],
-            temperature=0.0, max_tokens=3, model=config.get("SafetyClassifierModel") or config.get("UtilityModel") or None,
+            [{"role": "system", "content": _CLASSIFIER_SYSTEM}, {"role": "user", "content": user}],
+            temperature=0.0, max_tokens=3,
+            model=config.get("SafetyClassifierModel") or config.get("UtilityModel") or None,
         )
-        return (out or "").strip().upper().startswith("YES")
+        verdict = (out or "").strip().upper()
+        if not verdict.startswith(("YES", "NO")):
+            logging.error("Safety classifier gave no verdict (%r), treating as fail_%s", verdict[:40],
+                          "closed" if fail_closed else "open")
+            return fail_closed
+        return verdict.startswith("YES")
     except Exception:
         logging.exception("Safety classifier call failed (fail_%s)", "closed" if fail_closed else "open")
         return fail_closed
 
 
-async def classify_image_prompt(text: str) -> str | None:
+async def classify_image_prompt(request: str, final_prompt: str = "") -> str | None:
     """Second opinion on an image prompt. Fails CLOSED: no verdict, no image."""
     if not config.get("SafetyClassifierImages", True):
         return None
-    return "classifier: prompt judged to involve a minor" if await _classify(text, fail_closed=True) else None
+    message = f"Image request: {request}" + (f"\nFinal image prompt: {final_prompt}" if final_prompt else "")
+    return "classifier: prompt judged to involve a minor" if await _classify(message, "", fail_closed=True) else None
 
 
-async def classify_chat(text: str) -> str | None:
-    """Second opinion on a chat turn. Fails open — the main model call would fail too."""
+async def classify_chat(message: str, context: str = "") -> str | None:
+    """Second opinion on a chat turn. Fails open: the main model call would fail too."""
     if not config.get("SafetyClassifierChat", True):
         return None
-    return "classifier: text judged to involve a minor" if await _classify(text, fail_closed=False) else None
+    return "classifier: text judged to involve a minor" if await _classify(message, context, fail_closed=False) else None
 
 
 # ---- Layer 3: look at the rendered image --------------------------------------

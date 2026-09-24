@@ -104,7 +104,7 @@ async def handle_text_message(message: discord.Message, text_override: str | Non
 
         incoming = text_override if text_override is not None else (message.content or "")
         recent_ctx = " ".join(t for _, t in cm.get(ch_id).pairs()[-6:])[-1500:]
-        blocked = chat_message_blocked(incoming, recent_ctx) or await classify_chat(f"{recent_ctx[-600:]}\n{incoming}")
+        blocked = chat_message_blocked(incoming, recent_ctx) or await classify_chat(incoming, recent_ctx)
         if blocked:
             # Never reaches the model and never enters conversation memory, so it
             # cannot steer later replies.
@@ -195,7 +195,7 @@ async def handle_text_message(message: discord.Message, text_override: str | Non
 
         # Include the user's current turn: they may have set the scene in the very
         # message that prompted this reply.
-        out_blocked = chat_message_blocked(reply, f"{recent_ctx} {incoming}") or await classify_chat(f"{incoming}\n---\n{reply}")
+        out_blocked = chat_message_blocked(reply, f"{recent_ctx} {incoming}") or await classify_chat(reply, f"{recent_ctx} {incoming}")
         if out_blocked:
             # Drop the exchange entirely: storing it would let the reply seed
             # later turns through the conversation window and summaries.

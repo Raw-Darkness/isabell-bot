@@ -182,3 +182,16 @@ def test_dm_gets_one_redirect_per_day(monkeypatch):
     asyncio.run(app._dm_redirect(m))
     asyncio.run(app._dm_redirect(m))
     assert len(dm.sent) == 1 and "<#10>" in dm.sent[0] and "age-restricted" in dm.sent[0]
+
+
+def test_classifier_gets_message_and_context_separately(monkeypatch):
+    seen = {}
+
+    async def capture(messages, **kw):
+        seen["user"] = messages[-1]["content"]
+        return "maybe"
+    monkeypatch.setattr(llm, "chat_async", capture)
+    # An answer that is neither YES nor NO: chat fails open, images fail closed.
+    assert asyncio.run(safety.classify_chat("the message", "earlier talk")) is None
+    assert seen["user"].startswith("CONTEXT:\nearlier talk") and seen["user"].endswith("MESSAGE:\nthe message")
+    assert asyncio.run(safety.classify_image_prompt("a request", "tags")) is not None
