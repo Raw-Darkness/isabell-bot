@@ -11,7 +11,7 @@ from . import lore
 from .core import config, safe_send, channel_key, ensure_can_send, get_user_bucket, too_similar as _too_similar, images_enabled, image_unavailable
 from .llm import chat_async
 from .memory import cm
-from .images import (ipm, _last_image_b64, run_image_job, compile_sd_prompt, refine_image_prompt,
+from .images import (recent_conversation, ipm, _last_image_b64, run_image_job, compile_sd_prompt, refine_image_prompt,
                      image_tools_for, run_tool_image)
 from .safety import strip_pasted_negative, chat_message_blocked, refuse_chat, image_prompt_blocked, refuse_image_request, classify_chat
 
@@ -309,7 +309,7 @@ async def handle_image_message(message: discord.Message, text_override: str | No
                 init_b64 = _last_image_b64.get(ch_id)
         else:
             status_msg = await safe_send(message.channel, "Hang on while I sketch that for you…")
-            sd_prompt = raw if (exact_mode or _looks_like_tag_prompt(raw)) else await compile_sd_prompt(raw)
+            sd_prompt = raw if (exact_mode or _looks_like_tag_prompt(raw)) else await compile_sd_prompt(raw, recent_conversation(ch_id))
 
         await run_image_job(
             message.channel,

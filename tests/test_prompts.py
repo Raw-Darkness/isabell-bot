@@ -62,3 +62,34 @@ def test_a1111_metadata_format_and_plain_text():
 
 def test_blocked_term_in_the_positive_part_still_blocks():
     assert safety.image_prompt_blocked(safety.strip_pasted_negative("**Prompt:** a loli\n**Negative:** blurry")) == "loli"
+
+
+def test_rewrite_knows_who_yourself_is_and_uses_the_conversation(monkeypatch):
+    import asyncio
+    seen = {}
+
+    async def capture(messages, **kw):
+        seen["system"], seen["user"] = messages[0]["content"], messages[-1]["content"]
+        seen["temperature"] = kw.get("temperature")
+        return "rating_safe, 1girl"
+    monkeypatch.setattr(images, "chat_async", capture)
+    monkeypatch.setitem(images.config, "SelfImageTags", "1girl, black hair, golden dress")
+    asyncio.run(images.compile_sd_prompt("yourself", "we talked about werewolves"))
+    assert "1girl, black hair, golden dress" in seen["system"]
+    assert seen["user"].startswith("CONVERSATION:\nwe talked about werewolves") and seen["user"].endswith("REQUEST:\nyourself")
+    assert seen["temperature"] == 0.0
+
+
+def test_open_ended_request_gets_one_of_the_owners_ideas(monkeypatch):
+    import asyncio
+    seen = []
+
+    async def capture(messages, **kw):
+        seen.append(messages[-1]["content"])
+        return "rating_safe, no humans"
+    monkeypatch.setattr(images, "chat_async", capture)
+    monkeypatch.setitem(images.config, "SelfImageIdeas", ["idea one", "idea two"])
+    asyncio.run(images.compile_sd_prompt("draw what you want"))
+    asyncio.run(images.compile_sd_prompt("an orc in the snow"))
+    assert "Her choice for this one: idea" in seen[0]
+    assert "Her choice" not in seen[1]

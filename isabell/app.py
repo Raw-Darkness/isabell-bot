@@ -15,7 +15,7 @@ from discord import app_commands
 from . import core, lore
 from .core import config, bot, tree, safe_send, channel_key, get_user_bucket, images_enabled, image_channel_allowed
 from .memory import cm
-from .images import ipm, ImageActionsView, run_image_job, compile_sd_prompt
+from .images import recent_conversation, ipm, ImageActionsView, run_image_job, compile_sd_prompt
 from .chat import (handle_text_message, handle_image_message, looks_like_image_request,
                    should_route_to_image_followup, _looks_like_tag_prompt)
 from .safety import strip_pasted_negative, image_prompt_blocked, refuse_image_request, user_on_cooldown, expire_refusals, forget_refusals
@@ -189,8 +189,9 @@ async def draw_command(interaction: discord.Interaction, prompt: str, style: str
         await interaction.response.send_message("Hang on while I sketch that for you…")
         status_msg = await interaction.original_response()
         raw = prompt.strip()[:1500]
-        sd_prompt = raw if (exact or _looks_like_tag_prompt(raw)) else await compile_sd_prompt(raw)
         parent = getattr(channel, "parent", None)
+        ch_key = parent.id if parent is not None else channel.id
+        sd_prompt = raw if (exact or _looks_like_tag_prompt(raw)) else await compile_sd_prompt(raw, recent_conversation(ch_key))
         asyncio.create_task(run_image_job(
             channel, ch_id=parent.id if parent is not None else channel.id, user_prompt=raw, sd_prompt=sd_prompt,
             neg=neg, batch=int(count), width=width, height=height, positive_prefix=positive_prefix,

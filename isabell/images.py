@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import random
 import re
 import time
 from dataclasses import dataclass, field
@@ -513,8 +514,26 @@ def pony_guide(max_chars: int) -> str:
         "- Everyone depicted is an adult. Never write tags that make anyone look young: child, young, teen, "
         "loli, shota, school uniform, flat chest, childlike or small proportions.\n"
         "- No negative-prompt terms, no repeated tags, no explanations.\n"
-        f"- Do not mention {name} or any persona unless the request does."
+        f"- Do not depict {name} unless the request refers to her (see SELF)."
     )
+
+
+def self_guide() -> str:
+    """How to read requests that point at the bot herself or leave the choice to her."""
+    name = (config.get("Name") or "the assistant").strip()
+    tags = str(config.get("SelfImageTags") or "").strip()
+    taste = str(config.get("SelfImageChoice") or "").strip()
+    out = [f"SELF: the request is addressed to {name}."]
+    if tags:
+        out.append(f"If it refers to her ('yourself', 'you', 'your', '{name}', 'your body'), depict her with these tags, "
+                   f"then add the pose, clothing changes and setting the request asks for: {tags}.")
+    out.append("If it leaves the subject to her ('what you want', 'anything', 'surprise me', 'your favourite'), do not "
+               "draw a generic person: choose ONE specific scene she would pick" + (f" ({taste})" if taste else "")
+               + ", fitting the recent conversation.")
+    out.append("'me' or 'I' in the request means the person asking, not her.")
+    out.append("CONVERSATION, when given, is recent chat. Use it only to resolve references such as 'that', 'her', "
+               "'the same' or 'what we talked about'.")
+    return "\n".join(out)
 
 
 _KEEP_UNDERSCORE = ("rating_", "score_", "source_")
@@ -586,18 +605,42 @@ def max_prompt_chars() -> int:
     return int(config.get("ImagePromptMaxChars", 600))
 
 
-async def compile_sd_prompt(user_text: str) -> str:
+# "Draw what you want", "surprise me", "something you like": the choice is left to her.
+_OPEN_ENDED_RE = re.compile(
+    r"\b(what(ever)? you (want|like|wish|desire|fancy|prefer|feel like)|anything|surprise me|your (own )?(choice|pick|"
+    r"favou?rites?)|something (that )?you (like|love|enjoy|want))\b", re.I)
+
+
+async def compile_sd_prompt(user_text: str, conversation: str = "") -> str:
     max_chars = max_prompt_chars()
-    msgs = [{"role": "system", "content": pony_guide(max_chars)},
-            {"role": "user", "content": f"REQUEST:\n{user_text}"}]
+    open_ended = bool(_OPEN_ENDED_RE.search(user_text or ""))
+    request = f"REQUEST:\n{user_text}"
+    ideas = [str(i).strip() for i in (config.get("SelfImageIdeas") or []) if str(i).strip()]
+    if open_ended and ideas and not conversation.strip():
+        # Variety comes from a list the owner curates; the rewrite itself stays precise.
+        request += f"\n(Her choice for this one: {random.choice(ideas)})"
+    elif open_ended:
+        request += ("\n(The choice is hers. Pick one specific scene from her world that fits the conversation, "
+                    "not a generic person.)")
+    if conversation.strip():
+        request = f"CONVERSATION:\n{conversation.strip()[-800:]}\n\n{request}"
+    msgs = [{"role": "system", "content": pony_guide(max_chars) + "\n" + self_guide()},
+            {"role": "user", "content": request}]
     try:
-        raw = await chat_async(msgs, temperature=0.0, max_tokens=max(160, max_chars // 3), model=utility_model())
+        raw = await chat_async(msgs, temperature=0.0, max_tokens=max(160, max_chars // 3),
+                               model=utility_model())
         raw = (raw or "").strip().strip("`").splitlines()[0] if (raw or "").strip() else ""
         raw = re.sub(r"\((\d(?:\.\d+)?)\)\s*([^,()\n]+)", lambda m: f"({m.group(2).strip()}:{m.group(1)})", raw)
         return clip_tags(ensure_rating(tidy_tags(raw, user_text), user_text), max_chars) or clip_tags(user_text, max_chars)
     except Exception:
         logging.exception("LLM prompt compose failed; returning user text")
         return clip_tags(user_text, max_chars)
+
+
+def recent_conversation(channel_id: int, turns: int = 4) -> str:
+    """The last few chat lines in a channel, for resolving 'draw that' and 'draw her'."""
+    from .memory import cm
+    return "\n".join(t for _, t in cm.get(channel_id).pairs()[-turns:])
 
 
 async def refine_image_prompt(last: ImagePromptRecord, followup_text: str) -> dict[str, str]:
@@ -646,8 +689,9 @@ IMAGE_TOOL = {
                         "order: rating tag (rating_safe / rating_questionable / rating_explicit), who "
                         "(1girl, 1boy, solo...), subject, clothing, pose, setting, lighting and framing. "
                         "Use the conversation for context the user left implicit, but add nothing they did "
-                        "not ask for. Spaces not underscores. No quality tags, no sentences. Everyone "
-                        "depicted is an adult."
+                        "not ask for. If they ask for you or yourself, depict yourself exactly as your "
+                        "persona describes your appearance. Spaces not underscores. No quality tags, no "
+                        "sentences. Everyone depicted is an adult."
                     ),
                 },
                 "aspect": {"type": "string", "enum": ["square", "portrait", "landscape"]},
