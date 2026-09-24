@@ -92,6 +92,10 @@ def build_system_prefix(query: str = "") -> str:
     detail = lore.retrieve_lore(query)
     if detail:
         parts.append(f"\n\nRelevant lore detail for this message:\n{detail}")
+    # Last, so it outweighs style cues in the persona and in her own earlier replies.
+    style = (config.get("ReplyStyle") or "").strip()
+    if style:
+        parts.append(f"\n\n{style}")
     return "\n".join(parts)
 
 

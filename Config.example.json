@@ -19,6 +19,7 @@
     "scheduler": "Karras",
     "Name": "Isabell",
     "Personality": "The character's personality, voice and boundaries. Stays out of git.",
+    "ReplyStyle": "REPLY STYLE: this is a Discord chat, so speak. Most of every reply is your spoken words. Asterisk actions are seasoning: many replies have none; when you use one, keep it to a single short clause of under 12 words, never a paragraph, and do not open most replies with one.",
     "ModChannelID": 0,
     "ModAlertWebhook": "",
     "FrequencyPenalty": 0.3,
