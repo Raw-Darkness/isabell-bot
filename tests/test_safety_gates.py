@@ -195,3 +195,20 @@ def test_classifier_gets_message_and_context_separately(monkeypatch):
     assert asyncio.run(safety.classify_chat("the message", "earlier talk")) is None
     assert seen["user"].startswith("CONTEXT:\nearlier talk") and seen["user"].endswith("MESSAGE:\nthe message")
     assert asyncio.run(safety.classify_image_prompt("a request", "tags")) is not None
+
+
+def test_refusal_messages_say_what_and_why():
+    hard = safety.refusal_message("loli", image=True, hard=True)
+    assert "‘loli’" in hard and "moderators have been notified" in hard
+    age = safety.refusal_message('stated age 15 "…i am 15…"', image=False, hard=False)
+    assert "aged 15" in age and "rephrase" in age and "aren't punished" in age
+    earlier = safety.refusal_message('stated age 13 [from an earlier message] "…"', image=False, hard=False)
+    assert earlier.startswith(("Careful", core.config.get("RefusalVoiceSoft", "Careful"))) and "a moment ago" in earlier
+    assert "for the next" in safety.refusal_message("cub", image=True, hard=True, crossed=True)
+    assert "stopped myself" in safety.refusal_message("stated age 12", image=False, hard=False, model_output=True)
+
+
+def test_image_refusal_can_leave_the_reply_to_the_caller(env):
+    ch = Chan(10)
+    text = asyncio.run(safety.refuse_image_request(ch, 5, "u", "loli", "a loli", send=False))
+    assert "‘loli’" in text and ch.sent == []

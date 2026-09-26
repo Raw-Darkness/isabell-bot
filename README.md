@@ -19,7 +19,7 @@ Every image and every chat turn passes through all of these. A refusal is logged
 | 4 | **Channel gating.** The bot only operates in `AllowedChannels` that Discord flags as age-restricted, and not in DMs unless `AllowInDMs` is set. | `core.channel_allowed` |
 | 5 | **Cooldown.** Three hard refusals in 24 hours and the bot stops responding to that account for 24 hours. Contextual matches never count. | `safety.user_on_cooldown` |
 
-A blocked exchange never enters conversation memory, so it cannot steer later replies.
+A blocked exchange never enters conversation memory, so it cannot steer later replies. The member is told what tripped the refusal (the word they used, a stated age, or the classifier's concern) and what happens next; `RefusalVoiceHard` and `RefusalVoiceSoft` set her opening words.
 
 **Stored data** — conversation memory, image prompts and the refusal log — is encrypted at rest with `isabell.key` (created on first run; back it up with the data) and deleted after `RetentionDays` (default 30). `!forget <user_id>` by owner DM deletes everything held about one person. The word filter is the same code as the monitor in Barnabus; keep the two in sync when tuning.
 

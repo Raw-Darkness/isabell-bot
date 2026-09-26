@@ -333,8 +333,55 @@ def user_on_cooldown(uid: int) -> bool:
     return False
 
 
-async def refuse_image_request(channel, uid: int, name: str, matched: str, text: str):
-    """Refuse a blocked prompt: tell the user, log it, alert the mods."""
+# ---- Refusal wording ---------------------------------------------------------
+# Members are told WHAT tripped the refusal and WHY, in her voice. Quoting a word
+# they typed themselves reveals nothing new; classifier refusals name the concern
+# instead, since there is no single word to point at.
+def _reason(matched: str, image: bool) -> str:
+    """One sentence: what tripped the refusal and why it counts."""
+    m = (matched or "").strip()
+    thing = "request" if image else "message"
+    earlier = "Together with what was said a moment ago, " if "[from an earlier message" in m else ""
+    if m.startswith("classifier: rendered"):
+        return "I painted it, but the finished image looked like it could show someone underage, so it stays in my studio."
+    if m.startswith("classifier"):
+        return f"Your {thing} reads as involving someone under 18 or a childlike character."
+    g = re.match(r"(?:stated age|age) (\d{1,2})\b", m)
+    if g:
+        lead = earlier or f"Your {thing} "
+        return f"{lead}{'that ' if earlier else ''}reads as a character aged {g.group(1)}, and everyone here must be an adult."
+    g = re.match(r"(.+?) \+ sexual context", m)
+    if g:
+        return f"{earlier}{'that' if earlier else f'Your {thing}'} puts ‘{g.group(1)}’ into a sexual scene, which reads as a minor."
+    g = re.match(r"(\w+) near sexual term", m)
+    if g:
+        return f"Your {thing} puts ‘{g.group(1)}’ right next to something sexual, which reads as a minor."
+    return (f"Your {thing} uses ‘{m}’. Nothing involving minors or childlike characters is allowed here, "
+            "however it's framed.")
+
+
+def refusal_message(matched: str, *, image: bool, hard: bool, crossed: bool = False, model_output: bool = False) -> str:
+    """What the member sees: her voice, the reason, and what happens next."""
+    hard_voice = config.get("RefusalVoiceHard", "No, darling.")
+    soft_voice = config.get("RefusalVoiceSoft", "Careful, darling.")
+    if model_output:
+        text = (f"{soft_voice} I started to answer and stopped myself: my reply drifted toward someone underage, "
+                "and I never go there. Let's take this in another direction.")
+    elif hard:
+        text = f"{hard_voice} {_reason(matched, image)} The moderators have been notified."
+    else:
+        tail = ("Describe the character as clearly adult and I'll try again."
+                if matched.startswith("classifier: rendered") else "If that's not what you meant, rephrase it.")
+        text = f"{soft_voice} {_reason(matched, image)} {tail} A moderator will check, and misunderstandings aren't punished."
+    if crossed:
+        hours = int(float(config.get("RefusalIgnoreHours", 24)))
+        text += f" That's the third time today, so I won't answer you for the next {hours} hours."
+    return text
+
+
+async def refuse_image_request(channel, uid: int, name: str, matched: str, text: str, send: bool = True) -> str:
+    """Refuse a blocked prompt: log it, alert the mods, and (unless the caller replies
+    itself, e.g. privately to a slash command) tell the member why. Returns the text."""
     logging.warning("Image prompt REFUSED | user=%s (%s) | matched=%r | text=%r", name, uid, matched, (text or "")[:200])
     _log_refusal("image", uid, name, matched, text)
     hard = not matched.startswith("classifier")
@@ -351,12 +398,14 @@ async def refuse_image_request(channel, uid: int, name: str, matched: str, text:
             f"User: **{name}** ({uid})\nMatched: `{matched}`\nPrompt: {(text or '')[:300]}",
             ping=hard,
         )
-    await safe_send(channel, config.get("ImageRefusalMessage",
-                    "No. That is not something I will ever draw, and the moderators have been notified."))
+    reply = refusal_message(matched, image=True, hard=hard, crossed=crossed)
+    if send:
+        await safe_send(channel, reply)
+    return reply
 
 
 async def refuse_chat(channel, uid: int, name: str, matched: str, text: str, source: str):
-    """Refuse a blocked chat message or model reply."""
+    """Refuse a blocked chat message or model reply, and say why."""
     hard = _is_hard_match(matched)
     logging.warning("Chat REFUSED (%s, %s) | user=%s (%s) | matched=%r | text=%r",
                     source, "hard" if hard else "contextual", name, uid, matched, (text or "")[:200])
@@ -369,13 +418,8 @@ async def refuse_chat(channel, uid: int, name: str, matched: str, text: str, sou
             f"User: **{name}** ({uid})\nMatched: `{matched}`\nText: {(text or '')[:300]}",
             ping=hard,
         )
-    if hard:
-        msg = config.get("ChatRefusalMessage", "No. I will not go there, and the moderators have been notified.")
-    else:
-        msg = config.get("ChatRefusalMessageSoft",
-                         "I can't continue with that wording. If that wasn't what you meant, rephrase and we'll "
-                         "carry on — a moderator has been notified so they can check.")
-    await safe_send(channel, msg)
+    await safe_send(channel, refusal_message(matched, image=False, hard=hard, crossed=crossed,
+                                             model_output=(source == "model output")))
 
 
 # ---- Layer 2: model second opinion ------------------------------------------

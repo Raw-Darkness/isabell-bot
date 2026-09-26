@@ -326,11 +326,9 @@ async def _image_button(interaction: discord.Interaction, action: str):
             return
         blocked = image_prompt_blocked(rec.final_sd_prompt) or image_prompt_blocked(rec.user_prompt)
         if blocked:
-            await interaction.response.send_message(config.get(
-                "ImageRefusalMessage",
-                "No. That is not something I will ever draw, and the moderators have been notified."), ephemeral=True)
-            await refuse_image_request(interaction.channel, interaction.user.id,
-                                       interaction.user.display_name, blocked, rec.final_sd_prompt)
+            reply = await refuse_image_request(interaction.channel, interaction.user.id,
+                                               interaction.user.display_name, blocked, rec.final_sd_prompt, send=False)
+            await interaction.response.send_message(reply, ephemeral=True)
             return
         if not get_user_bucket(interaction.user.id).consume():
             await interaction.response.send_message("You're requesting images too fast — slow down a bit.", ephemeral=True)
